@@ -19,9 +19,6 @@
 #include "mbedtls/error.h"
 #include "mbedtls/mbedtls_config.h"
 
-struct gen_key_args {
-    mp_arg_val_t ec_curve;
-};
 
 STATIC NORETURN void mbedtls_raise_error(int err) {
     // _mbedtls_ssl_send and _mbedtls_ssl_recv (below) turn positive error codes from the
@@ -66,13 +63,6 @@ STATIC NORETURN void mbedtls_raise_error(int err) {
 
 //version
 STATIC const MP_DEFINE_STR_OBJ(mbedtls_version_obj, MBEDTLS_VERSION_STRING_FULL);
-
-
-// info()
-STATIC mp_obj_t mbedtls_info(void) {
-    return MP_OBJ_NEW_SMALL_INT(42);
-}
-MP_DEFINE_CONST_FUN_OBJ_0(mbedtls_info_obj, mbedtls_info);
 
 
 //ec_curves()
@@ -129,6 +119,9 @@ STATIC mp_obj_t mbedtls_ec_gen_key(const mp_obj_t o_in) {
     mbedtls_pk_init( &key );
     mbedtls_ctr_drbg_init( &ctr_drbg );
     mbedtls_entropy_init( &entropy );
+    int bits = curve_info->bit_size;
+    unsigned char output_buf[bits];
+
     // Seed
     const byte seed[] = "upy";
     ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, seed, sizeof(seed));
@@ -150,9 +143,10 @@ STATIC mp_obj_t mbedtls_ec_gen_key(const mp_obj_t o_in) {
     
 
     //Export key
-    unsigned char output_buf[512];
+    //int bits = curve_info->bit_size;
+    //unsigned char output_buf[bits];
     size_t len = 0;
-    memset(output_buf, 0, 512);
+    memset(output_buf, 0, bits);
     if( ( ret = mbedtls_pk_write_key_pem( &key, output_buf, sizeof(output_buf) )) != 0 ){
 	    goto cleanup;
 
@@ -162,7 +156,7 @@ STATIC mp_obj_t mbedtls_ec_gen_key(const mp_obj_t o_in) {
     mp_obj_t pkey = mp_obj_new_bytes(output_buf, len);
 
     // Export public key
-    memset(output_buf, 0, 512);
+    memset(output_buf, 0, bits);
 
     if( ( ret = mbedtls_pk_write_pubkey_pem( &key, output_buf, sizeof(output_buf) )) != 0 ){
 	    goto cleanup;
@@ -186,17 +180,57 @@ cleanup:
 	mbedtls_pk_free(&key);
 	mbedtls_ctr_drbg_free(&ctr_drbg);
 	mbedtls_entropy_free(&entropy);
-
-	if (ret == MBEDTLS_ERR_SSL_ALLOC_FAILED) {
- 		mp_raise_OSError(MP_ENOMEM);
-	}
-
-	else {
-        	mbedtls_raise_error(ret);
-	}
+        mbedtls_raise_error(ret);
 }
 MP_DEFINE_CONST_FUN_OBJ_1(mbedtls_ec_gen_key_obj, mbedtls_ec_gen_key);
 
+
+//Derive public key
+STATIC mp_obj_t mbedtls_ec_get_pubkey(const mp_obj_t key_in){
+   
+    mp_check_self(mp_obj_is_str_or_bytes(key_in));
+   
+    int ret; 
+    mbedtls_pk_context key;
+    mbedtls_pk_init( &key );
+
+
+    //Parse private key
+    size_t key_len;
+    const byte *pkey = (const byte *)mp_obj_str_get_data(key_in, &key_len);
+    unsigned char output_buf[key_len];
+
+
+    ret = mbedtls_pk_parse_key(&key, pkey, key_len + 1, NULL, 0);
+    if (ret != 0) {
+	    ret = MBEDTLS_ERR_PK_BAD_INPUT_DATA; // use general error for all key errors
+	    goto cleanup;
+    }
+	
+    //Export key
+    //unsigned char output_buf[key_len];
+    size_t len = 0;
+    memset(output_buf, 0, key_len);
+
+    if( ( ret = mbedtls_pk_write_pubkey_pem( &key, output_buf, sizeof(output_buf) )) != 0 ){
+	    goto cleanup;
+
+    }
+    len = strlen( (char *) output_buf );
+
+    // Clean up
+    mbedtls_pk_free(&key); 
+
+
+    return mp_obj_new_bytes(output_buf, len);
+
+
+cleanup:
+	mbedtls_pk_free(&key);
+	mbedtls_raise_error(ret);
+	
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mbedtls_ec_get_pubkey_obj, mbedtls_ec_get_pubkey);
 
 
 // Sign
@@ -328,12 +362,12 @@ MP_DEFINE_CONST_FUN_OBJ_3(mbedtls_ec_key_verify_obj, mbedtls_ec_key_verify);
 
 
 STATIC const mp_rom_map_elem_t mp_module_mbedtls_globals_table[] = {
-    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_mbedtls) },
-    { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&mbedtls_info_obj) },
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_mbedtls) }, 
     { MP_ROM_QSTR(MP_QSTR_version), MP_ROM_PTR(&mbedtls_version_obj) },
     { MP_ROM_QSTR(MP_QSTR_ec_curves), MP_ROM_PTR(&mbedtls_ec_curves_obj) },
     { MP_ROM_QSTR(MP_QSTR_ec_curve_info), MP_ROM_PTR(&mbedtls_ec_curve_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_ec_gen_key), MP_ROM_PTR(&mbedtls_ec_gen_key_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ec_get_pubkey), MP_ROM_PTR(&mbedtls_ec_get_pubkey_obj) },
     { MP_ROM_QSTR(MP_QSTR_ec_key_sign), MP_ROM_PTR(&mbedtls_ec_key_sign_obj) },
     { MP_ROM_QSTR(MP_QSTR_ec_key_verify), MP_ROM_PTR(&mbedtls_ec_key_verify_obj) }
 };

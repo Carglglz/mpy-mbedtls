@@ -5,4 +5,6 @@
 
 # Add the C example.
 include(${CMAKE_CURRENT_LIST_DIR}/mbedtls/micropython.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/x509/micropython.cmake)
+
 
