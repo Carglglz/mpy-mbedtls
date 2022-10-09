@@ -134,9 +134,8 @@ STATIC mp_obj_t mbedtls_ec_gen_key(size_t n_args, const mp_obj_t *pos_args, mp_m
     mbedtls_entropy_init( &entropy );
     int bits = curve_info->bit_size;
     unsigned char output_buf[bits];
-	// unsigned char *c = output_buf;
-
-    // Seed
+	unsigned char *c = output_buf;
+	 // Seed
     const byte seed[] = "upy";
     ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, seed, sizeof(seed));
     if (ret != 0) {
@@ -171,14 +170,14 @@ STATIC mp_obj_t mbedtls_ec_gen_key(size_t n_args, const mp_obj_t *pos_args, mp_m
  		pkey = mp_obj_new_bytes(output_buf, len);
 	}
 	else {
-		mp_raise_ValueError(MP_ERROR_TEXT("NotImplementedError: DER format"));
-	//	if( ( ret = mbedtls_pk_write_key_der( &key, output_buf, sizeof(output_buf) )) <= 0 ){
-	//    	goto cleanup;
+		// mp_raise_ValueError(MP_ERROR_TEXT("NotImplementedError: DER format"));
+		if( ( ret = mbedtls_pk_write_key_der( &key, output_buf, sizeof(output_buf) )) < 0 ){
+	    	goto cleanup;
 
-    //		}
-	//	len = ret;
-	//	c = output_buf + sizeof(output_buf) - len;
-	//	pkey = mp_obj_new_bytes(c, len);
+    		}
+		len = ret;
+		c = output_buf + sizeof(output_buf) - len;
+		pkey = mp_obj_new_bytes(c, len);
 
 	}
     // len = strlen( (char *) output_buf );
@@ -197,16 +196,18 @@ STATIC mp_obj_t mbedtls_ec_gen_key(size_t n_args, const mp_obj_t *pos_args, mp_m
  		pubkey = mp_obj_new_bytes(output_buf, len);
 	}
 	else{
-		mp_raise_ValueError(MP_ERROR_TEXT("NotImplementedError: DER format"));
-//		unsigned char output_der[bits];
-//
-//		if( ( ret = mbedtls_pk_write_pubkey_der( &key, output_der, sizeof(output_der) )) <= 0 ){
-//	    	goto cleanup;
-//
-//    	}
-//		len = ret;
-//		c = output_der + sizeof(output_der) - len;
-//		pubkey = mp_obj_new_bytes(c, len);
+		// mp_raise_ValueError(MP_ERROR_TEXT("NotImplementedError: DER format"));
+		unsigned char output_der[bits];
+		unsigned char *cder = output_der;
+		memset(output_der, 0, bits);
+
+		if( ( ret = mbedtls_pk_write_pubkey_der( &key, output_der, sizeof(output_der) )) < 0 ){
+	    	goto cleanup;
+
+    	}
+		len = ret;
+		cder = output_der + sizeof(output_der) - len;
+		pubkey = mp_obj_new_bytes(cder, len);
 
 	}
     //len = strlen( (char *) output_buf );
@@ -233,11 +234,12 @@ MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_ec_gen_key_obj, 0,  mbedtls_ec_gen_key);
 
 
 //Derive public key
-STATIC mp_obj_t mbedtls_ec_get_pubkey(const mp_obj_t key_in){
+STATIC mp_obj_t mbedtls_ec_get_pubkey(const mp_obj_t key_in, const mp_obj_t format){
    
     mp_check_self(mp_obj_is_str_or_bytes(key_in));
    
     int ret; 
+	int fmt = mp_obj_get_int(format);
     mbedtls_pk_context key;
     mbedtls_pk_init( &key );
 
@@ -247,8 +249,11 @@ STATIC mp_obj_t mbedtls_ec_get_pubkey(const mp_obj_t key_in){
     const byte *pkey = (const byte *)mp_obj_str_get_data(key_in, &key_len);
     unsigned char output_buf[key_len];
 
+	if (fmt == 0){
+		key_len = key_len + 1;
+	}
 
-    ret = mbedtls_pk_parse_key(&key, pkey, key_len + 1, NULL, 0);
+    ret = mbedtls_pk_parse_key(&key, pkey, key_len, NULL, 0);
     if (ret != 0) {
 	    // ret = MBEDTLS_ERR_PK_BAD_INPUT_DATA; // use general error for all key errors
 	    goto cleanup;
@@ -256,20 +261,40 @@ STATIC mp_obj_t mbedtls_ec_get_pubkey(const mp_obj_t key_in){
 	
     //Export key
     //unsigned char output_buf[key_len];
+	mp_obj_t pubkey;
     size_t len = 0;
     memset(output_buf, 0, key_len);
+	if (fmt == FORMAT_PEM){
+    	if( ( ret = mbedtls_pk_write_pubkey_pem( &key, output_buf, sizeof(output_buf) )) != 0 ){
+	    	goto cleanup;
 
-    if( ( ret = mbedtls_pk_write_pubkey_pem( &key, output_buf, sizeof(output_buf) )) != 0 ){
-	    goto cleanup;
+    	}
+		len = strlen( (char *) output_buf );
+ 		pubkey = mp_obj_new_bytes(output_buf, len);
+	}
+	else{
+		// mp_raise_ValueError(MP_ERROR_TEXT("NotImplementedError: DER format"));
+		unsigned char output_der[key_len];
+		unsigned char *cder = output_der;
+		memset(output_der, 0, key_len);
 
-    }
-    len = strlen( (char *) output_buf );
+		if( ( ret = mbedtls_pk_write_pubkey_der( &key, output_der, sizeof(output_der) )) < 0 ){
+	    	goto cleanup;
 
+    	}
+		len = ret;
+		cder = output_der + sizeof(output_der) - len;
+		pubkey = mp_obj_new_bytes(cder, len);
+
+	}
+
+
+    
     // Clean up
     mbedtls_pk_free(&key); 
 
 
-    return mp_obj_new_bytes(output_buf, len);
+    return pubkey;
 
 
 cleanup:
@@ -277,16 +302,28 @@ cleanup:
 	mbedtls_raise_error(ret);
 	
 }
-MP_DEFINE_CONST_FUN_OBJ_1(mbedtls_ec_get_pubkey_obj, mbedtls_ec_get_pubkey);
+MP_DEFINE_CONST_FUN_OBJ_2(mbedtls_ec_get_pubkey_obj, mbedtls_ec_get_pubkey);
 
 
 
 
 // Sign
-STATIC mp_obj_t mbedtls_ec_key_sign(const mp_obj_t key_in, const mp_obj_t data_in) {
+STATIC mp_obj_t mbedtls_ec_key_sign(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
+	
+	static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
+        { MP_QSTR_data, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none}},
+		{ MP_QSTR_format, MP_ARG_INT | MP_ARG_INT, {.u_int = FORMAT_PEM} },
+    };
 
-    mp_check_self(mp_obj_is_str_or_bytes(key_in));
-    mp_check_self(mp_obj_is_str_or_bytes(data_in));
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+
+    mp_check_self(mp_obj_is_str_or_bytes(args[0].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[1].u_obj));
+
+	int fmt = args[2].u_int;
     
     mbedtls_pk_context key;
     mbedtls_entropy_context entropy;
@@ -308,8 +345,11 @@ STATIC mp_obj_t mbedtls_ec_key_sign(const mp_obj_t key_in, const mp_obj_t data_i
      }
     //Parse private key
     size_t key_len;
-    const byte *pkey = (const byte *)mp_obj_str_get_data(key_in, &key_len);
-    ret = mbedtls_pk_parse_key(&key, pkey, key_len + 1, NULL, 0);
+    const byte *pkey = (const byte *)mp_obj_str_get_data(args[0].u_obj, &key_len);
+	if (fmt == 0){
+		key_len = key_len + 1;
+	}
+    ret = mbedtls_pk_parse_key(&key, pkey, key_len, NULL, 0);
     if (ret != 0) {
 	    // ret = MBEDTLS_ERR_PK_BAD_INPUT_DATA; // use general error for all key errors
 	    goto cleanup;
@@ -317,7 +357,7 @@ STATIC mp_obj_t mbedtls_ec_key_sign(const mp_obj_t key_in, const mp_obj_t data_i
 
     //Parse data
     size_t data_len;
-    const byte *data = (const byte *)mp_obj_str_get_data(data_in, &data_len);
+    const byte *data = (const byte *)mp_obj_str_get_data(args[1].u_obj, &data_len);
 
 
     // SHA-256 hash of data
@@ -345,16 +385,28 @@ cleanup:
 	mbedtls_entropy_free(&entropy);
 	mbedtls_raise_error(ret);
 }
-MP_DEFINE_CONST_FUN_OBJ_2(mbedtls_ec_key_sign_obj, mbedtls_ec_key_sign);
+MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_ec_key_sign_obj, 2, mbedtls_ec_key_sign);
 
 
 // Verify
-STATIC mp_obj_t mbedtls_ec_key_verify(const mp_obj_t key_in, const mp_obj_t data_in, const mp_obj_t sig_in) {
+STATIC mp_obj_t mbedtls_ec_key_verify(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
+	
+	static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none} },
+        { MP_QSTR_data, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none} },
+		{ MP_QSTR_signature, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none} },
+		{ MP_QSTR_format, MP_ARG_INT | MP_ARG_INT, {.u_int = FORMAT_PEM} },
+    };
 
-    mp_check_self(mp_obj_is_str_or_bytes(key_in));
-    mp_check_self(mp_obj_is_str_or_bytes(data_in));
-    mp_check_self(mp_obj_is_str_or_bytes(sig_in));
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
+
+    mp_check_self(mp_obj_is_str_or_bytes(args[0].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[1].u_obj));
+	mp_check_self(mp_obj_is_str_or_bytes(args[2].u_obj));
+
+	int fmt = args[3].u_int;
     
     mbedtls_pk_context key;
     //init 
@@ -363,8 +415,12 @@ STATIC mp_obj_t mbedtls_ec_key_verify(const mp_obj_t key_in, const mp_obj_t data
     mbedtls_pk_init( &key );
     //Parse public key
     size_t key_len;
-    const byte *pkey = (const byte *)mp_obj_str_get_data(key_in, &key_len);
-    ret = mbedtls_pk_parse_public_key(&key, pkey, key_len + 1);
+    const byte *pkey = (const byte *)mp_obj_str_get_data(args[0].u_obj, &key_len);
+	if (fmt == 0){
+		key_len = key_len + 1;
+	}
+
+    ret = mbedtls_pk_parse_public_key(&key, pkey, key_len);
     if (ret != 0) {
 	    //ret = MBEDTLS_ERR_PK_BAD_INPUT_DATA; // use general error for all key errors
 	    goto cleanup;
@@ -372,11 +428,11 @@ STATIC mp_obj_t mbedtls_ec_key_verify(const mp_obj_t key_in, const mp_obj_t data
 
     //Parse data
     size_t data_len;
-    const byte *data = (const byte *)mp_obj_str_get_data(data_in, &data_len);
+    const byte *data = (const byte *)mp_obj_str_get_data(args[1].u_obj, &data_len);
 
     //Parse sig
     size_t sig_len;
-    const byte *sig = (const byte *)mp_obj_str_get_data(sig_in, &sig_len);
+    const byte *sig = (const byte *)mp_obj_str_get_data(args[2].u_obj, &sig_len);
 
 
     // SHA-256 hash of data
@@ -399,7 +455,7 @@ cleanup:
 	mbedtls_pk_free(&key);
     mbedtls_raise_error(ret);
 }
-MP_DEFINE_CONST_FUN_OBJ_3(mbedtls_ec_key_verify_obj, mbedtls_ec_key_verify);
+MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_ec_key_verify_obj, 3, mbedtls_ec_key_verify);
 
 
 
