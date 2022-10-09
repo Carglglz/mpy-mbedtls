@@ -1,0 +1,2 @@
+[b' cert. version     : 3\n serial number     : 06:7D:2E:F4:C5:EB:28:6F:AC:42:90:A9:46:C0:2D:85:90:F2:CC:73\n issuer name       : SN=Foo, O=MicroPython, CN=Bar\n subject name      : SN=UserFoo, O=MicroPython, CN=UserBar\n issued  on        : 2022-10-09 01:07:04\n expires on        : 2027-10-08 01:07:04\n signed using      : ECDSA with SHA256\n EC key size       : 256 bits\n subject alt name  : wss://192.168.1.1:8833, wss://192.168.4.1:8833\n']
+CERT: OK
