@@ -49,8 +49,17 @@ MicroPython bindings for ECDSA keys basic functionality and x509 cert/csr utilit
 
 In `micropython/ports/esp32`
 
+make a `mbedtls` dir and copy `mpy-mbedtls/mbedtls/mbedtls_config.h` into this `mbedtls`
+
+e.g. 
 ```console
-$ make BOARD=GENERIC USER_C_MODULES=../../../../<path to user modules>/mpy-mbedtls/micropython.cmake FROZEN_MANIFEST=<absolute path to user modules>/mpy-mbedtls/ports/esp32/manifest.py -j4
+ports/esp32: $ mkdir mbedtls
+ports/esp32: $ cp ../../../<path to user modules>/mpy-mbedtls/mbedtls/mbedtls_config.h mbedtls/
+```
+then build the firmware with:
+
+```console
+ports/esp32: $ make BOARD=GENERIC USER_C_MODULES=../../../../<path to user modules>/mpy-mbedtls/micropython.cmake FROZEN_MANIFEST=<absolute path to user modules>/mpy-mbedtls/ports/esp32/manifest.py -j4
 ```
 
 Other ports (e.g. `unix`):
