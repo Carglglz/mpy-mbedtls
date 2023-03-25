@@ -15,6 +15,9 @@
 #include "mbedtls/pk.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
+#include "mbedtls/ecdh.h"
+#include "mbedtls/cipher.h"
+#include "mbedtls/ccm.h"
 #include "mbedtls/debug.h"
 #include "mbedtls/error.h"
 #include "mbedtls/mbedtls_config.h"
@@ -458,6 +461,350 @@ cleanup:
 MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_ec_key_verify_obj, 3, mbedtls_ec_key_verify);
 
 
+// ECDH SECRET
+STATIC mp_obj_t mbedtls_ecdh_secret(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
+	
+	static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_key_ours, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none} },
+        { MP_QSTR_key_theirs, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none} },
+		{ MP_QSTR_format, MP_ARG_INT | MP_ARG_INT, {.u_int = FORMAT_PEM} },
+    };
+
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+
+    mp_check_self(mp_obj_is_str_or_bytes(args[0].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[1].u_obj));
+
+    
+    mbedtls_ecdh_context ctx;
+	mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+
+    mbedtls_pk_context key_ours; // private key 
+
+    mbedtls_pk_context key_theirs; // public key 
+    //init 
+    int ret;
+	size_t olen;
+    unsigned char secret[32]; 
+	int fmt = args[2].u_int;
+
+    mbedtls_ecdh_init( &ctx );
+    mbedtls_pk_init( &key_ours );
+    mbedtls_pk_init( &key_theirs );
+    mbedtls_ctr_drbg_init( &ctr_drbg );
+    mbedtls_entropy_init( &entropy );
+
+    // Seed
+    const byte seed[] = "upy";
+    ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, seed, sizeof(seed));
+    if (ret != 0) {
+        goto cleanup;
+     }
+    //Parse private key
+    size_t key_len_o;
+    const byte *pkey = (const byte *)mp_obj_str_get_data(args[0].u_obj, &key_len_o);
+	if (fmt == 0){
+		key_len_o = key_len_o + 1;
+	}
+    ret = mbedtls_pk_parse_key(&key_ours, pkey, key_len_o, NULL, 0);
+    if (ret != 0) {
+	    // ret = MBEDTLS_ERR_PK_BAD_INPUT_DATA; // use general error for all key errors
+	    goto cleanup;
+    }
+    //Parse public key
+    size_t key_len_t;
+    const byte *pubkey = (const byte *)mp_obj_str_get_data(args[1].u_obj, &key_len_t);
+	if (fmt == 0){
+		key_len_t = key_len_t + 1;
+	}
+
+    ret = mbedtls_pk_parse_public_key(&key_theirs, pubkey, key_len_t);
+    if (ret != 0) {
+	    //ret = MBEDTLS_ERR_PK_BAD_INPUT_DATA; // use general error for all key errors
+	    goto cleanup;
+    }
+
+	//Setup ECDH Context
+	mbedtls_ecp_keypair *key_o = mbedtls_pk_ec(key_ours);							 // 
+	ret = mbedtls_ecdh_get_params(&ctx, key_o, MBEDTLS_ECDH_OURS);
+	if (ret != 0){
+		goto cleanup;
+	}
+
+	mbedtls_ecp_keypair *key_t = mbedtls_pk_ec(key_theirs);							 // 
+	ret = mbedtls_ecdh_get_params(&ctx, key_t, MBEDTLS_ECDH_THEIRS);
+
+	if (ret != 0){
+		goto cleanup;
+	}
+
+	//Calc Secret 
+	ret = mbedtls_ecdh_calc_secret(&ctx, &olen, secret, sizeof(secret), mbedtls_ctr_drbg_random, &ctr_drbg );
+     
+	if (ret != 0){
+		goto cleanup;
+	}
+    // Clean up
+    mbedtls_pk_free(&key_ours);
+    mbedtls_pk_free(&key_theirs);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    mbedtls_entropy_free(&entropy);
+	mbedtls_ecdh_free(&ctx);
+
+    
+    return mp_obj_new_bytes(secret, olen);
+	
+cleanup:
+	mbedtls_pk_free(&key_ours);
+    mbedtls_pk_free(&key_theirs);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    mbedtls_entropy_free(&entropy);
+	mbedtls_ecdh_free(&ctx);
+    mbedtls_raise_error(ret);
+}
+MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_ecdh_secret_obj, 2, mbedtls_ecdh_secret);
+
+// AES
+
+//ciphers()
+STATIC mp_obj_t mbedtls_aes_ciphers(void) {
+    mp_obj_t cipher_list = mp_obj_new_list(0, NULL);
+    const int *cipher_info;
+    const mbedtls_cipher_info_t *cipher_name;
+    cipher_info = mbedtls_cipher_list();
+    while( *cipher_info ){
+		cipher_name = mbedtls_cipher_info_from_type( *cipher_info); 
+	mp_obj_list_append(cipher_list, MP_OBJ_FROM_PTR(mp_obj_new_str(cipher_name->name, strlen(cipher_name->name))));
+	cipher_info++;
+    }
+
+    return cipher_list;
+}
+MP_DEFINE_CONST_FUN_OBJ_0(mbedtls_aes_ciphers_obj, mbedtls_aes_ciphers);
+
+// AES ENCRYPT
+STATIC mp_obj_t mbedtls_aes_enc(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
+	
+	static const mp_arg_t allowed_args[] = {
+		
+        { MP_QSTR_cipher, MP_ARG_OBJ | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_QSTR(MP_QSTR_AES128CCM)} },
+        { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
+        { MP_QSTR_iv, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
+        { MP_QSTR_data, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none}},
+        { MP_QSTR_add, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none}},
+    };
+
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+
+    mp_check_self(mp_obj_is_str_or_bytes(args[0].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[1].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[2].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[3].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[4].u_obj));
+
+    
+	mbedtls_cipher_context_t ctx;
+    //init 
+    int ret;
+
+	//Parse cipher
+	size_t ciph_len;
+    const char *cipher = (const char*)mp_obj_str_get_data(args[0].u_obj, &ciph_len);
+    const mbedtls_cipher_info_t *cipher_info;	
+    //Parse key
+	size_t key_len;
+    const unsigned char *key = (const unsigned char*)mp_obj_str_get_data(args[1].u_obj, &key_len);
+    //Parse iv
+	size_t iv_len; // 7-13 bytes
+    const unsigned char *iv = (const unsigned char*)mp_obj_str_get_data(args[2].u_obj, &iv_len);
+	
+	size_t tag_len = 16; // 7-13 bytes
+    unsigned char tag[16];
+    memset(tag, 0, tag_len);
+    //Parse data
+	size_t data_len;
+    const unsigned char *data = (const unsigned char*)mp_obj_str_get_data(args[3].u_obj, &data_len);
+	
+    //Parse additional data
+	size_t addata_len;
+    const unsigned char *addata = (const unsigned char*)mp_obj_str_get_data(args[4].u_obj, &addata_len);
+	// Encrypt
+	
+	unsigned char buf[data_len+tag_len];
+    memset(buf, 0, data_len+tag_len);
+
+    cipher_info = mbedtls_cipher_info_from_string( cipher );
+	if(cipher_info == NULL){
+
+    	mp_raise_ValueError(MP_ERROR_TEXT("cipher not found"));
+
+	}
+	mbedtls_cipher_type_t cp_type;
+	cp_type = cipher_info->type;
+
+	mbedtls_cipher_init( &ctx );
+	mbedtls_cipher_setup( &ctx, cipher_info);
+
+	ret = mbedtls_cipher_setkey( &ctx, (const unsigned char*) key, key_len * 8, MBEDTLS_ENCRYPT);
+    if (ret != 0) {
+	    goto cleanup;
+    }
+
+	size_t olen;
+	if (cp_type == MBEDTLS_CIPHER_AES_128_CCM || cp_type == MBEDTLS_CIPHER_AES_192_CCM || 
+			cp_type == MBEDTLS_CIPHER_AES_256_CCM  ){
+
+		ret = mbedtls_cipher_auth_encrypt( &ctx, iv, iv_len, addata, addata_len, data,
+			   								data_len, buf, &olen, tag, tag_len );
+		
+		if (ret != 0) {
+			goto cleanup;
+		}
+	}
+	else{
+		ret = mbedtls_cipher_crypt( &ctx, iv, iv_len, 
+				data, data_len, buf, &olen); 
+
+		if (ret != 0) {
+			goto cleanup;
+		}
+    }
+	mp_obj_t enc = mp_obj_new_bytes(buf, olen);
+	mp_obj_t tagf = mp_obj_new_bytes(tag, tag_len);
+    mp_obj_t tuple[2] = {enc, tagf};
+    // Clean up
+	mbedtls_cipher_free( &ctx );
+
+    return mp_obj_new_tuple(2, tuple);
+
+	
+cleanup:
+
+	mbedtls_cipher_free( &ctx );
+	mbedtls_raise_error(ret);
+}
+MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_aes_enc_obj, 5, mbedtls_aes_enc);
+
+
+STATIC mp_obj_t mbedtls_aes_dec(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
+	
+	static const mp_arg_t allowed_args[] = {
+
+        { MP_QSTR_cipher, MP_ARG_OBJ | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_QSTR(MP_QSTR_AES128CCM)} },
+        { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
+        { MP_QSTR_iv, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
+        { MP_QSTR_data, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none}},
+        { MP_QSTR_tag, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
+        { MP_QSTR_add, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
+    };
+
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+
+    mp_check_self(mp_obj_is_str_or_bytes(args[0].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[1].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[2].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[3].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[4].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[5].u_obj));
+
+    
+	mbedtls_cipher_context_t ctx;
+    //init 
+    int ret;
+	//Parse cipher
+	size_t ciph_len;
+    const char *cipher = (const char*)mp_obj_str_get_data(args[0].u_obj, &ciph_len);
+    const mbedtls_cipher_info_t *cipher_info;	
+    //Parse key
+	size_t key_len;
+    const unsigned char *key = (const unsigned char*)mp_obj_str_get_data(args[1].u_obj, &key_len);
+    //Parse iv
+	size_t iv_len; // 7-13 bytes
+    const unsigned char *iv = (const unsigned char*)mp_obj_str_get_data(args[2].u_obj, &iv_len);
+
+    //Parse data
+	size_t data_len;
+    const unsigned char *data = (const unsigned char*)mp_obj_str_get_data(args[3].u_obj, &data_len);
+
+	size_t tag_len; // 7-13 bytes
+    unsigned char *tag = ( unsigned char*)mp_obj_str_get_data(args[4].u_obj, &tag_len);
+
+    //Parse additional data
+	size_t addata_len;
+    const unsigned char *addata = (const unsigned char*)mp_obj_str_get_data(args[5].u_obj, &addata_len);
+
+	unsigned char buf[data_len];
+
+
+    cipher_info = mbedtls_cipher_info_from_string( cipher );
+	if(cipher_info == NULL){
+
+    	mp_raise_ValueError(MP_ERROR_TEXT("cipher not found"));
+
+	}
+
+	mbedtls_cipher_type_t cp_type;
+	cp_type = cipher_info->type;
+
+	mbedtls_cipher_init( &ctx );
+	mbedtls_cipher_setup( &ctx, cipher_info);
+
+
+	ret = mbedtls_cipher_setkey( &ctx, (const unsigned char*) key, key_len * 8, MBEDTLS_DECRYPT);
+    if (ret != 0) {
+	    goto cleanup;
+    }
+
+	
+	// Decrypt
+	
+    memset(buf, 0, data_len);
+	/* size_t olen; */
+	/* ret = mbedtls_cipher_auth_decrypt( &ctx, iv, iv_len, addata, addata_len, data, data_len, buf, &olen, tag, tag_len ); */
+     
+    /* if (ret != 0) { */
+	/*     goto cleanup; */
+    /* } */
+    // Clean up
+	
+	size_t olen;
+	if (cp_type == MBEDTLS_CIPHER_AES_128_CCM || cp_type == MBEDTLS_CIPHER_AES_192_CCM || 
+			cp_type == MBEDTLS_CIPHER_AES_256_CCM  ){
+
+		ret = mbedtls_cipher_auth_decrypt( &ctx, iv, iv_len, addata, addata_len, data,
+			   								data_len, buf, &olen, tag, tag_len );
+		
+		if (ret != 0) {
+			goto cleanup;
+		}
+	}
+	else{
+		ret = mbedtls_cipher_crypt( &ctx, iv, iv_len, 
+				data, data_len, buf, &olen); 
+
+		if (ret != 0) {
+			goto cleanup;
+		}
+    }
+
+	mbedtls_cipher_free( &ctx );
+
+    return mp_obj_new_bytes(buf, olen);
+
+	
+cleanup:
+
+	mbedtls_cipher_free( &ctx );
+	mbedtls_raise_error(ret);
+}
+MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_aes_dec_obj, 6, mbedtls_aes_dec);
 
 STATIC const mp_rom_map_elem_t mp_module_mbedtls_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_mbedtls) }, 
@@ -468,6 +815,10 @@ STATIC const mp_rom_map_elem_t mp_module_mbedtls_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_ec_get_pubkey), MP_ROM_PTR(&mbedtls_ec_get_pubkey_obj) },
     { MP_ROM_QSTR(MP_QSTR_ec_key_sign), MP_ROM_PTR(&mbedtls_ec_key_sign_obj) },
     { MP_ROM_QSTR(MP_QSTR_ec_key_verify), MP_ROM_PTR(&mbedtls_ec_key_verify_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ecdh_secret), MP_ROM_PTR(&mbedtls_ecdh_secret_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_encrypt), MP_ROM_PTR(&mbedtls_aes_enc_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_decrypt), MP_ROM_PTR(&mbedtls_aes_dec_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_ciphers), MP_ROM_PTR(&mbedtls_aes_ciphers_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_FORMAT_PEM), MP_ROM_INT(FORMAT_PEM) },
 	{ MP_ROM_QSTR(MP_QSTR_FORMAT_DER), MP_ROM_INT(FORMAT_DER) },
 };
