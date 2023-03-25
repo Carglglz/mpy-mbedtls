@@ -19,11 +19,6 @@ for cipher in ciphers:
     try:
         ciphertext, mac = mbedtls.aes_encrypt(cipher, key, iv, data, add)
 
-        # print(
-        #     f"Ciphertext: {hexlify(ciphertext).decode().upper()}",
-        #     f"MAC: {hexlify(mac).decode().upper()}",
-        # )
-
         dec = mbedtls.aes_decrypt(cipher, key, iv, ciphertext, mac, add)
 
         assert data == dec
