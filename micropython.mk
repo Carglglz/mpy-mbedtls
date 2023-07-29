@@ -1,0 +1,5 @@
+
+MBEDTLS_MOD_DIR := $(USERMOD_DIR)
+
+SRC_USERMOD += $(MBEDTLS_MOD_DIR)/mbedtls/mod_mbedtls.c
+SRC_USERMOD += $(MBEDTLS_MOD_DIR)/x509/mod_x509.c

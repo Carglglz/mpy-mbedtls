@@ -1,6 +1,7 @@
 import os
 import mbedtls
 from binascii import hexlify
+import sys
 
 ciphers = mbedtls.aes_ciphers()
 key = os.urandom(16)  # 128 bits key
@@ -17,11 +18,12 @@ for cipher in ciphers:
     else:
         iv = os.urandom(13)
     try:
-        ciphertext, mac = mbedtls.aes_encrypt(cipher, key, iv, data, add)
+        ciphertext = mbedtls.aes_encrypt(cipher, key, iv, data, 16, add)
 
-        dec = mbedtls.aes_decrypt(cipher, key, iv, ciphertext, mac, add)
+        dec = mbedtls.aes_decrypt(cipher, key, iv, ciphertext, 16, add)
 
         assert data == dec
         print("OK")
     except Exception as e:
         print(e)
+        # sys.print_exception(e)

@@ -243,8 +243,12 @@ STATIC mp_obj_t mbedtls_ec_get_pubkey(const mp_obj_t key_in, const mp_obj_t form
    
     int ret; 
 	int fmt = mp_obj_get_int(format);
+
     mbedtls_pk_context key;
+    mbedtls_ctr_drbg_context ctr_drbg;
+
     mbedtls_pk_init( &key );
+    mbedtls_ctr_drbg_init( &ctr_drbg );
 
 
     //Parse private key
@@ -256,7 +260,12 @@ STATIC mp_obj_t mbedtls_ec_get_pubkey(const mp_obj_t key_in, const mp_obj_t form
 		key_len = key_len + 1;
 	}
 
+	#if MBEDTLS_VERSION_NUMBER >= 0x03000000
+
+    ret = mbedtls_pk_parse_key(&key, pkey, key_len, NULL, 0, mbedtls_ctr_drbg_random, &ctr_drbg);
+	#else 
     ret = mbedtls_pk_parse_key(&key, pkey, key_len, NULL, 0);
+	#endif
     if (ret != 0) {
 	    // ret = MBEDTLS_ERR_PK_BAD_INPUT_DATA; // use general error for all key errors
 	    goto cleanup;
@@ -352,7 +361,12 @@ STATIC mp_obj_t mbedtls_ec_key_sign(size_t n_args, const mp_obj_t *pos_args, mp_
 	if (fmt == 0){
 		key_len = key_len + 1;
 	}
+	#if MBEDTLS_VERSION_NUMBER >= 0x03000000
+
+    ret = mbedtls_pk_parse_key(&key, pkey, key_len, NULL, 0, mbedtls_ctr_drbg_random, &ctr_drbg);
+	#else
     ret = mbedtls_pk_parse_key(&key, pkey, key_len, NULL, 0);
+	#endif
     if (ret != 0) {
 	    // ret = MBEDTLS_ERR_PK_BAD_INPUT_DATA; // use general error for all key errors
 	    goto cleanup;
@@ -369,10 +383,18 @@ STATIC mp_obj_t mbedtls_ec_key_sign(size_t n_args, const mp_obj_t *pos_args, mp_
     }
 
     //Sign data hash
+	
+	#if MBEDTLS_VERSION_NUMBER >= 0x03000000
+    if( ( ret = mbedtls_pk_sign( &key, MBEDTLS_MD_SHA256, hash, sizeof(hash), buf, sizeof(buf), &olen,
+                         mbedtls_ctr_drbg_random, &ctr_drbg ) ) != 0 ){
+    	goto cleanup;
+    }
+	#else
     if( ( ret = mbedtls_pk_sign( &key, MBEDTLS_MD_SHA256, hash, 0, buf, &olen,
                          mbedtls_ctr_drbg_random, &ctr_drbg ) ) != 0 ){
     	goto cleanup;
     }
+	#endif
      
     // Clean up
     mbedtls_pk_free(&key); 
@@ -509,7 +531,12 @@ STATIC mp_obj_t mbedtls_ecdh_secret(size_t n_args, const mp_obj_t *pos_args, mp_
 	if (fmt == 0){
 		key_len_o = key_len_o + 1;
 	}
+	#if MBEDTLS_VERSION_NUMBER >= 0x03000000
+
+    ret = mbedtls_pk_parse_key(&key_ours, pkey, key_len_o, NULL, 0, mbedtls_ctr_drbg_random, &ctr_drbg);
+	#else
     ret = mbedtls_pk_parse_key(&key_ours, pkey, key_len_o, NULL, 0);
+	#endif
     if (ret != 0) {
 	    // ret = MBEDTLS_ERR_PK_BAD_INPUT_DATA; // use general error for all key errors
 	    goto cleanup;
@@ -577,7 +604,12 @@ STATIC mp_obj_t mbedtls_aes_ciphers(void) {
     cipher_info = mbedtls_cipher_list();
     while( *cipher_info ){
 		cipher_name = mbedtls_cipher_info_from_type( *cipher_info); 
+	#if MBEDTLS_VERSION_NUMBER >= 0x03000000
+
+	mp_obj_list_append(cipher_list, MP_OBJ_FROM_PTR(mp_obj_new_str(cipher_name->private_name, strlen(cipher_name->private_name))));
+	#else
 	mp_obj_list_append(cipher_list, MP_OBJ_FROM_PTR(mp_obj_new_str(cipher_name->name, strlen(cipher_name->name))));
+	#endif
 	cipher_info++;
     }
 
@@ -594,6 +626,7 @@ STATIC mp_obj_t mbedtls_aes_enc(size_t n_args, const mp_obj_t *pos_args, mp_map_
         { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
         { MP_QSTR_iv, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
         { MP_QSTR_data, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none}},
+        { MP_QSTR_tag, MP_ARG_REQUIRED | MP_ARG_INT, {.u_int = 13 }},
         { MP_QSTR_add, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none}},
     };
 
@@ -605,7 +638,7 @@ STATIC mp_obj_t mbedtls_aes_enc(size_t n_args, const mp_obj_t *pos_args, mp_map_
     mp_check_self(mp_obj_is_str_or_bytes(args[1].u_obj));
     mp_check_self(mp_obj_is_str_or_bytes(args[2].u_obj));
     mp_check_self(mp_obj_is_str_or_bytes(args[3].u_obj));
-    mp_check_self(mp_obj_is_str_or_bytes(args[4].u_obj));
+    mp_check_self(mp_obj_is_str_or_bytes(args[5].u_obj));
 
     
 	mbedtls_cipher_context_t ctx;
@@ -623,16 +656,14 @@ STATIC mp_obj_t mbedtls_aes_enc(size_t n_args, const mp_obj_t *pos_args, mp_map_
 	size_t iv_len; // 7-13 bytes
     const unsigned char *iv = (const unsigned char*)mp_obj_str_get_data(args[2].u_obj, &iv_len);
 	
-	size_t tag_len = 16; // 7-13 bytes
-    unsigned char tag[16];
-    memset(tag, 0, tag_len);
+	size_t tag_len = args[4].u_int; // 7-13 bytes
     //Parse data
 	size_t data_len;
     const unsigned char *data = (const unsigned char*)mp_obj_str_get_data(args[3].u_obj, &data_len);
 	
     //Parse additional data
 	size_t addata_len;
-    const unsigned char *addata = (const unsigned char*)mp_obj_str_get_data(args[4].u_obj, &addata_len);
+    const unsigned char *addata = (const unsigned char*)mp_obj_str_get_data(args[5].u_obj, &addata_len);
 	// Encrypt
 	
 	unsigned char buf[data_len+tag_len];
@@ -645,8 +676,12 @@ STATIC mp_obj_t mbedtls_aes_enc(size_t n_args, const mp_obj_t *pos_args, mp_map_
 
 	}
 	mbedtls_cipher_type_t cp_type;
-	cp_type = cipher_info->type;
 
+	#if MBEDTLS_VERSION_NUMBER >= 0x03000000
+	cp_type = cipher_info->private_type;
+	#else
+	cp_type = cipher_info->type;
+	#endif
 	mbedtls_cipher_init( &ctx );
 	mbedtls_cipher_setup( &ctx, cipher_info);
 
@@ -659,8 +694,8 @@ STATIC mp_obj_t mbedtls_aes_enc(size_t n_args, const mp_obj_t *pos_args, mp_map_
 	if (cp_type == MBEDTLS_CIPHER_AES_128_CCM || cp_type == MBEDTLS_CIPHER_AES_192_CCM || 
 			cp_type == MBEDTLS_CIPHER_AES_256_CCM  ){
 
-		ret = mbedtls_cipher_auth_encrypt( &ctx, iv, iv_len, addata, addata_len, data,
-			   								data_len, buf, &olen, tag, tag_len );
+		ret = mbedtls_cipher_auth_encrypt_ext( &ctx, iv, iv_len, addata, addata_len, data,
+			   								data_len, buf, data_len + tag_len, &olen, tag_len );
 		
 		if (ret != 0) {
 			goto cleanup;
@@ -675,12 +710,12 @@ STATIC mp_obj_t mbedtls_aes_enc(size_t n_args, const mp_obj_t *pos_args, mp_map_
 		}
     }
 	mp_obj_t enc = mp_obj_new_bytes(buf, olen);
-	mp_obj_t tagf = mp_obj_new_bytes(tag, tag_len);
-    mp_obj_t tuple[2] = {enc, tagf};
+	/* mp_obj_t tagf = mp_obj_new_bytes(tag, tag_len); */
+    /* mp_obj_t tuple[2] = {enc, tagf}; */
     // Clean up
 	mbedtls_cipher_free( &ctx );
 
-    return mp_obj_new_tuple(2, tuple);
+    return enc;
 
 	
 cleanup:
@@ -699,7 +734,7 @@ STATIC mp_obj_t mbedtls_aes_dec(size_t n_args, const mp_obj_t *pos_args, mp_map_
         { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
         { MP_QSTR_iv, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
         { MP_QSTR_data, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none}},
-        { MP_QSTR_tag, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
+        { MP_QSTR_tag, MP_ARG_REQUIRED | MP_ARG_INT, {.u_int = 13 }},
         { MP_QSTR_add, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
     };
 
@@ -711,7 +746,6 @@ STATIC mp_obj_t mbedtls_aes_dec(size_t n_args, const mp_obj_t *pos_args, mp_map_
     mp_check_self(mp_obj_is_str_or_bytes(args[1].u_obj));
     mp_check_self(mp_obj_is_str_or_bytes(args[2].u_obj));
     mp_check_self(mp_obj_is_str_or_bytes(args[3].u_obj));
-    mp_check_self(mp_obj_is_str_or_bytes(args[4].u_obj));
     mp_check_self(mp_obj_is_str_or_bytes(args[5].u_obj));
 
     
@@ -733,8 +767,8 @@ STATIC mp_obj_t mbedtls_aes_dec(size_t n_args, const mp_obj_t *pos_args, mp_map_
 	size_t data_len;
     const unsigned char *data = (const unsigned char*)mp_obj_str_get_data(args[3].u_obj, &data_len);
 
-	size_t tag_len; // 7-13 bytes
-    unsigned char *tag = ( unsigned char*)mp_obj_str_get_data(args[4].u_obj, &tag_len);
+	size_t tag_len = args[4].u_int; // 7-13 bytes
+    /* unsigned char *tag = ( unsigned char*)mp_obj_str_get_data(args[4].u_obj, &tag_len); */
 
     //Parse additional data
 	size_t addata_len;
@@ -751,7 +785,12 @@ STATIC mp_obj_t mbedtls_aes_dec(size_t n_args, const mp_obj_t *pos_args, mp_map_
 	}
 
 	mbedtls_cipher_type_t cp_type;
+
+	#if MBEDTLS_VERSION_NUMBER >= 0x03000000
+	cp_type = cipher_info->private_type;
+	#else
 	cp_type = cipher_info->type;
+	#endif
 
 	mbedtls_cipher_init( &ctx );
 	mbedtls_cipher_setup( &ctx, cipher_info);
@@ -778,8 +817,8 @@ STATIC mp_obj_t mbedtls_aes_dec(size_t n_args, const mp_obj_t *pos_args, mp_map_
 	if (cp_type == MBEDTLS_CIPHER_AES_128_CCM || cp_type == MBEDTLS_CIPHER_AES_192_CCM || 
 			cp_type == MBEDTLS_CIPHER_AES_256_CCM  ){
 
-		ret = mbedtls_cipher_auth_decrypt( &ctx, iv, iv_len, addata, addata_len, data,
-			   								data_len, buf, &olen, tag, tag_len );
+		ret = mbedtls_cipher_auth_decrypt_ext( &ctx, iv, iv_len, addata, addata_len, data,
+			   								data_len, buf, data_len + tag_len, &olen, tag_len );
 		
 		if (ret != 0) {
 			goto cleanup;

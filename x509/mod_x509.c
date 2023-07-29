@@ -160,7 +160,11 @@ STATIC mp_obj_t x509_gen_csr(const mp_obj_t sub_in, const mp_obj_t key_in){
     //Parse private key
     size_t key_len;
     const byte *pkey = (const byte *)mp_obj_str_get_data(key_in, &key_len);
+	#if MBEDTLS_VERSION_NUMBER >= 0x03000000
+    ret = mbedtls_pk_parse_key(&key, pkey, key_len + 1, NULL, 0, mbedtls_ctr_drbg_random, &ctr_drbg);
+	#else
     ret = mbedtls_pk_parse_key(&key, pkey, key_len + 1, NULL, 0);
+	#endif
     if (ret != 0) {
 	    ret = MBEDTLS_ERR_PK_BAD_INPUT_DATA; // use general error for all key errors
 	    goto cleanup;
