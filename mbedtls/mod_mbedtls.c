@@ -165,12 +165,14 @@ STATIC mp_obj_t mbedtls_ec_gen_key(size_t n_args, const mp_obj_t *pos_args, mp_m
 	mp_obj_t pkey;
     memset(output_buf, 0, bits);
 	if (format == FORMAT_PEM){
+		#if defined(MBEDTLS_PEM_WRITE_C)
     	if( ( ret = mbedtls_pk_write_key_pem( &key, output_buf, sizeof(output_buf) )) != 0 ){
 	    	goto cleanup;
 
     	}
 		len = strlen( (char *) output_buf );
  		pkey = mp_obj_new_bytes(output_buf, len);
+		#endif
 	}
 	else {
 		// mp_raise_ValueError(MP_ERROR_TEXT("NotImplementedError: DER format"));
@@ -191,12 +193,14 @@ STATIC mp_obj_t mbedtls_ec_gen_key(size_t n_args, const mp_obj_t *pos_args, mp_m
 	mp_obj_t pubkey;
     memset(output_buf, 0, bits);
 	if (format == FORMAT_PEM){
+		#if defined(MBEDTLS_PEM_WRITE_C)
     	if( ( ret = mbedtls_pk_write_pubkey_pem( &key, output_buf, sizeof(output_buf) )) != 0 ){
 	    	goto cleanup;
 
     	}
 		len = strlen( (char *) output_buf );
  		pubkey = mp_obj_new_bytes(output_buf, len);
+		#endif
 	}
 	else{
 		// mp_raise_ValueError(MP_ERROR_TEXT("NotImplementedError: DER format"));
@@ -277,12 +281,14 @@ STATIC mp_obj_t mbedtls_ec_get_pubkey(const mp_obj_t key_in, const mp_obj_t form
     size_t len = 0;
     memset(output_buf, 0, key_len);
 	if (fmt == FORMAT_PEM){
+		#if defined(MBEDTLS_PEM_WRITE_C)
     	if( ( ret = mbedtls_pk_write_pubkey_pem( &key, output_buf, sizeof(output_buf) )) != 0 ){
 	    	goto cleanup;
 
     	}
 		len = strlen( (char *) output_buf );
  		pubkey = mp_obj_new_bytes(output_buf, len);
+		#endif
 	}
 	else{
 		// mp_raise_ValueError(MP_ERROR_TEXT("NotImplementedError: DER format"));
