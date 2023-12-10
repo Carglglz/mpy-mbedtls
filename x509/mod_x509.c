@@ -4,6 +4,8 @@
 #include "py/objstr.h"
 #include "py/obj.h"
 #include "py/stream.h"
+#include "py/reader.h"
+#include "extmod/vfs.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -24,6 +26,8 @@
 struct gen_key_args {
     mp_arg_val_t ec_curve;
 };
+
+// Helper functions
 
 STATIC NORETURN void mbedtls_raise_error(int err) {
     // _mbedtls_ssl_send and _mbedtls_ssl_recv (below) turn positive error codes from the
@@ -66,10 +70,56 @@ STATIC NORETURN void mbedtls_raise_error(int err) {
 }
 
 
+STATIC mp_obj_t read_file(mp_obj_t self_in) {
+    // file = open(args[0], "rb")
+    mp_obj_t f_args[2] = {
+        self_in,
+        MP_OBJ_NEW_QSTR(MP_QSTR_rb),
+    };
+    mp_obj_t file = mp_vfs_open(2, &f_args[0], (mp_map_t *)&mp_const_empty_map);
+
+    // data = file.read()
+    mp_obj_t dest[2];
+    mp_load_method(file, MP_QSTR_read, dest);
+    mp_obj_t data = mp_call_method_n_kw(0, 0, dest);
+
+    // file.close()
+    mp_stream_close(file);
+    return data;
+}
+
+
+STATIC mp_obj_t write_file(mp_obj_t self_in, mp_obj_t data_in) {
+    // file = open(args[0], "rb")
+    mp_obj_t f_args[2] = {
+        self_in,
+        MP_OBJ_NEW_QSTR(MP_QSTR_wb),
+    };
+    mp_obj_t file = mp_vfs_open(2, &f_args[0], (mp_map_t *)&mp_const_empty_map);
+
+    // data = file.read()
+    mp_obj_t dest[3];
+    mp_load_method(file, MP_QSTR_write, dest);
+    dest[2] = data_in;
+    mp_obj_t n_bytes = mp_call_method_n_kw(1, 0, dest);
+
+    // file.close()
+    mp_stream_close(file);
+    return n_bytes;
+}
+
 //parse_cert(b"")
 STATIC mp_obj_t x509_parse_cert(const mp_obj_t cert_in){
    
    mp_check_self(mp_obj_is_str_or_bytes(cert_in));
+   
+    // check if cert is a string/path
+    mp_obj_t cert_data;
+    if (!(mp_obj_is_type(cert_in, &mp_type_bytes))) {
+        cert_data = read_file(cert_in);
+    } else {
+        cert_data = cert_in;
+    }
    
    //init
    int ret;
@@ -81,7 +131,7 @@ STATIC mp_obj_t x509_parse_cert(const mp_obj_t cert_in){
    
    // Parse cert
    size_t cert_len;
-   const byte *cert = (const byte *)mp_obj_str_get_data(cert_in, &cert_len);
+   const byte *cert = (const byte *)mp_obj_str_get_data(cert_data, &cert_len);
    // len should include terminating null
    ret = mbedtls_x509_crt_parse(&crt, cert, cert_len + 1);
    if (ret != 0) {
@@ -115,11 +165,19 @@ MP_DEFINE_CONST_FUN_OBJ_1(x509_parse_cert_obj, x509_parse_cert);
 
 
 //gen_csr(subject, key)
-STATIC mp_obj_t x509_gen_csr(const mp_obj_t sub_in, const mp_obj_t key_in){
+STATIC mp_obj_t x509_gen_csr(const mp_obj_t sub_in, const mp_obj_t key_in, const mp_obj_t csr_name){
 
     mp_check_self(mp_obj_is_str_or_bytes(sub_in));
     mp_check_self(mp_obj_is_str_or_bytes(key_in));
-    
+
+    // check if key is a string/path
+    mp_obj_t key_data;
+    if (!(mp_obj_is_type(key_in, &mp_type_bytes))) {
+        key_data = read_file(key_in);
+    } else {
+        key_data = key_in;
+    }
+
     //init
     int ret;
     mbedtls_pk_context key;
@@ -159,7 +217,7 @@ STATIC mp_obj_t x509_gen_csr(const mp_obj_t sub_in, const mp_obj_t key_in){
     
     //Parse private key
     size_t key_len;
-    const byte *pkey = (const byte *)mp_obj_str_get_data(key_in, &key_len);
+    const byte *pkey = (const byte *)mp_obj_str_get_data(key_data, &key_len);
 	#if MBEDTLS_VERSION_NUMBER >= 0x03000000
     ret = mbedtls_pk_parse_key(&key, pkey, key_len + 1, NULL, 0, mbedtls_ctr_drbg_random, &ctr_drbg);
 	#else
@@ -183,14 +241,19 @@ STATIC mp_obj_t x509_gen_csr(const mp_obj_t sub_in, const mp_obj_t key_in){
 
     len = strlen( (char *) output_buf );
 
-    mp_obj_t csr = mp_obj_new_bytes(output_buf, len);
-
     mbedtls_x509write_csr_free( &req );
     mbedtls_pk_free( &key );
     mbedtls_ctr_drbg_free( &ctr_drbg );
     mbedtls_entropy_free( &entropy );
 
-    return csr;
+    mp_obj_t csr = mp_obj_new_bytes(output_buf, len);
+    
+    if (mp_obj_is_str_or_bytes(csr_name)){
+        return write_file(csr_name, csr);
+    }
+    else {
+        return csr;
+    }
 
 
 cleanup:
@@ -208,13 +271,29 @@ cleanup:
 	}
 
 }
-MP_DEFINE_CONST_FUN_OBJ_2(x509_gen_csr_obj, x509_gen_csr);
+MP_DEFINE_CONST_FUN_OBJ_3(x509_gen_csr_obj, x509_gen_csr);
 
 
 STATIC mp_obj_t x509_verify_cert(const mp_obj_t cert_in, const mp_obj_t cacert_in){
 
     mp_check_self(mp_obj_is_str_or_bytes(cert_in));
     mp_check_self(mp_obj_is_str_or_bytes(cacert_in));
+
+    // check if cert is a string/path
+    mp_obj_t cert_data;
+    if (!(mp_obj_is_type(cert_in, &mp_type_bytes))) {
+        cert_data = read_file(cert_in);
+    } else {
+        cert_data = cert_in;
+    }
+
+    // check if cacert is a string/path
+    mp_obj_t cacert_data;
+    if (!(mp_obj_is_type(cacert_in, &mp_type_bytes))) {
+        cacert_data = read_file(cacert_in);
+    } else {
+        cacert_data = cacert_in;
+    }
 
     //init 
     int ret;
@@ -227,7 +306,7 @@ STATIC mp_obj_t x509_verify_cert(const mp_obj_t cert_in, const mp_obj_t cacert_i
 
    // Parse cacert
    size_t cacert_len;
-   const byte *ca_cert = (const byte *)mp_obj_str_get_data(cacert_in, &cacert_len);
+   const byte *ca_cert = (const byte *)mp_obj_str_get_data(cacert_data, &cacert_len);
    // len should include terminating null
    ret = mbedtls_x509_crt_parse(&cacert, ca_cert, cacert_len + 1);
    if (ret != 0) {
@@ -236,7 +315,7 @@ STATIC mp_obj_t x509_verify_cert(const mp_obj_t cert_in, const mp_obj_t cacert_i
    }
    // Parse cert
    size_t cert_len;
-   const byte *cert = (const byte *)mp_obj_str_get_data(cert_in, &cert_len);
+   const byte *cert = (const byte *)mp_obj_str_get_data(cert_data, &cert_len);
    // len should include terminating null
    ret = mbedtls_x509_crt_parse(&crt, cert, cert_len + 1);
    if (ret != 0) {
@@ -269,16 +348,13 @@ cleanup:
 	    //printf("str len: %lu \n", strlen((char *) xcbuf));
         // The length of the string written (not including the terminated nul byte),
         // or a negative err code.
-            if (ret > 0) {
-		char err_msg[ret];
-		strcpy(err_msg, (const char*) xcbuf);
-
-                mp_raise_ValueError(MP_ERROR_TEXT(err_msg));
-            } 
-	    else {
-                mbedtls_raise_error(ret);
-            }	
-	}
+        if (ret > 0) {
+            mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("%s"), xcbuf);
+        } 
+        else {
+            mbedtls_raise_error(ret);
+        }
+    }
 	else {
 	    mbedtls_raise_error(ret);
 	}

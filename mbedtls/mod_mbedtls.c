@@ -4,6 +4,8 @@
 #include "py/objstr.h"
 #include "py/obj.h"
 #include "py/stream.h"
+#include "py/reader.h"
+#include "extmod/vfs.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -26,6 +28,7 @@
 #define FORMAT_DER              1
 
 
+// Helper functions
 STATIC NORETURN void mbedtls_raise_error(int err) {
     // _mbedtls_ssl_send and _mbedtls_ssl_recv (below) turn positive error codes from the
     // underlying socket into negative codes to pass them through mbedtls. Here we turn them
@@ -66,6 +69,44 @@ STATIC NORETURN void mbedtls_raise_error(int err) {
     #endif
 }
 
+
+STATIC mp_obj_t read_file(mp_obj_t self_in) {
+    // file = open(args[0], "rb")
+    mp_obj_t f_args[2] = {
+        self_in,
+        MP_OBJ_NEW_QSTR(MP_QSTR_rb),
+    };
+    mp_obj_t file = mp_vfs_open(2, &f_args[0], (mp_map_t *)&mp_const_empty_map);
+
+    // data = file.read()
+    mp_obj_t dest[2];
+    mp_load_method(file, MP_QSTR_read, dest);
+    mp_obj_t data = mp_call_method_n_kw(0, 0, dest);
+
+    // file.close()
+    mp_stream_close(file);
+    return data;
+}
+
+
+STATIC mp_obj_t write_file(mp_obj_t self_in, mp_obj_t data_in) {
+    // file = open(args[0], "rb")
+    mp_obj_t f_args[2] = {
+        self_in,
+        MP_OBJ_NEW_QSTR(MP_QSTR_wb),
+    };
+    mp_obj_t file = mp_vfs_open(2, &f_args[0], (mp_map_t *)&mp_const_empty_map);
+
+    // data = file.read()
+    mp_obj_t dest[3];
+    mp_load_method(file, MP_QSTR_write, dest);
+    dest[2] = data_in;
+    mp_obj_t n_bytes = mp_call_method_n_kw(1, 0, dest);
+
+    // file.close()
+    mp_stream_close(file);
+    return n_bytes;
+}
 
 //version
 STATIC const MP_DEFINE_STR_OBJ(mbedtls_version_obj, MBEDTLS_VERSION_STRING_FULL);
@@ -111,6 +152,8 @@ STATIC mp_obj_t mbedtls_ec_gen_key(size_t n_args, const mp_obj_t *pos_args, mp_m
 	static const mp_arg_t allowed_args[] = {
         { MP_QSTR_curve, MP_ARG_OBJ | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_QSTR(MP_QSTR_secp256r1)} },
         { MP_QSTR_format, MP_ARG_INT | MP_ARG_INT, {.u_int = FORMAT_PEM} },
+        { MP_QSTR_pkey, MP_ARG_OBJ | MP_ARG_OBJ, {.u_rom_obj = mp_const_none} },
+        { MP_QSTR_pubkey, MP_ARG_OBJ | MP_ARG_OBJ, {.u_rom_obj = mp_const_none} }, 
     };
 
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -159,6 +202,7 @@ STATIC mp_obj_t mbedtls_ec_gen_key(size_t n_args, const mp_obj_t *pos_args, mp_m
     
 
     //Export key
+    mp_obj_t key_pair[2];
     //int bits = curve_info->bit_size;
     //unsigned char output_buf[bits];
     size_t len = 0;
@@ -185,6 +229,16 @@ STATIC mp_obj_t mbedtls_ec_gen_key(size_t n_args, const mp_obj_t *pos_args, mp_m
 		pkey = mp_obj_new_bytes(c, len);
 
 	}
+
+    if (mp_obj_is_str_or_bytes(args[2].u_obj)){
+
+        mp_obj_t wr_sz = write_file(args[2].u_obj, pkey);
+        key_pair[0] = wr_sz;
+    }
+    else{
+        key_pair[0] = pkey;
+
+    }
     // len = strlen( (char *) output_buf );
 
     // mp_obj_t pkey = mp_obj_new_bytes(output_buf, len);
@@ -217,18 +271,27 @@ STATIC mp_obj_t mbedtls_ec_gen_key(size_t n_args, const mp_obj_t *pos_args, mp_m
 		pubkey = mp_obj_new_bytes(cder, len);
 
 	}
+
+    if (mp_obj_is_str_or_bytes(args[3].u_obj)){
+
+        mp_obj_t wr_szpub = write_file(args[3].u_obj, pubkey);
+        key_pair[1] = wr_szpub;
+    }
+    else {
+        key_pair[1] = pubkey;
+    }
     //len = strlen( (char *) output_buf );
 
     // mp_obj_t pubkey = mp_obj_new_bytes(output_buf, len);
 
-    mp_obj_t tuple[2] = {pkey, pubkey};
+    /* mp_obj_t tuple[2] = {pkey, pubkey}; */
 
     // Clean up
     mbedtls_pk_free(&key); 
     mbedtls_ctr_drbg_free(&ctr_drbg);
     mbedtls_entropy_free(&entropy);
 
-    return mp_obj_new_tuple(2, tuple);
+    return mp_obj_new_tuple(2, key_pair);
 
 	
 cleanup:
@@ -241,12 +304,30 @@ MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_ec_gen_key_obj, 0,  mbedtls_ec_gen_key);
 
 
 //Derive public key
-STATIC mp_obj_t mbedtls_ec_get_pubkey(const mp_obj_t key_in, const mp_obj_t format){
+STATIC mp_obj_t mbedtls_ec_get_pubkey(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
+	
+	static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
+		{ MP_QSTR_format, MP_ARG_INT | MP_ARG_INT, {.u_int = FORMAT_PEM} },
+        { MP_QSTR_out, MP_ARG_OBJ | MP_ARG_OBJ, {.u_rom_obj = mp_const_none}},
+    };
+
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+
+    mp_check_self(mp_obj_is_str_or_bytes(args[0].u_obj));
    
-    mp_check_self(mp_obj_is_str_or_bytes(key_in));
+    // check if key is a string/path
+    mp_obj_t key_data;
+    if (!(mp_obj_is_type(args[0].u_obj, &mp_type_bytes))) {
+        key_data = read_file(args[0].u_obj);
+    } else {
+        key_data = args[0].u_obj;
+    }
    
     int ret; 
-	int fmt = mp_obj_get_int(format);
+	int fmt = args[1].u_int;//mp_obj_get_int();
 
     mbedtls_pk_context key;
     mbedtls_ctr_drbg_context ctr_drbg;
@@ -257,7 +338,7 @@ STATIC mp_obj_t mbedtls_ec_get_pubkey(const mp_obj_t key_in, const mp_obj_t form
 
     //Parse private key
     size_t key_len;
-    const byte *pkey = (const byte *)mp_obj_str_get_data(key_in, &key_len);
+    const byte *pkey = (const byte *)mp_obj_str_get_data(key_data, &key_len);
     unsigned char output_buf[key_len];
 
 	if (fmt == 0){
@@ -306,12 +387,14 @@ STATIC mp_obj_t mbedtls_ec_get_pubkey(const mp_obj_t key_in, const mp_obj_t form
 
 	}
 
-
-    
     // Clean up
     mbedtls_pk_free(&key); 
 
+    if (mp_obj_is_str_or_bytes(args[2].u_obj)){
 
+        return write_file(args[2].u_obj, pubkey);
+         
+    }
     return pubkey;
 
 
@@ -320,9 +403,7 @@ cleanup:
 	mbedtls_raise_error(ret);
 	
 }
-MP_DEFINE_CONST_FUN_OBJ_2(mbedtls_ec_get_pubkey_obj, mbedtls_ec_get_pubkey);
-
-
+MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_ec_get_pubkey_obj, 1, mbedtls_ec_get_pubkey);
 
 
 // Sign
@@ -331,6 +412,7 @@ STATIC mp_obj_t mbedtls_ec_key_sign(size_t n_args, const mp_obj_t *pos_args, mp_
 	static const mp_arg_t allowed_args[] = {
         { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
         { MP_QSTR_data, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none}},
+        { MP_QSTR_out, MP_ARG_OBJ | MP_ARG_OBJ, {.u_rom_obj = mp_const_none}},
 		{ MP_QSTR_format, MP_ARG_INT | MP_ARG_INT, {.u_int = FORMAT_PEM} },
     };
 
@@ -341,7 +423,26 @@ STATIC mp_obj_t mbedtls_ec_key_sign(size_t n_args, const mp_obj_t *pos_args, mp_
     mp_check_self(mp_obj_is_str_or_bytes(args[0].u_obj));
     mp_check_self(mp_obj_is_str_or_bytes(args[1].u_obj));
 
-	int fmt = args[2].u_int;
+
+    // check if key is a string/path
+    mp_obj_t key_data;
+    if (!(mp_obj_is_type(args[0].u_obj, &mp_type_bytes))) {
+        key_data = read_file(args[0].u_obj);
+    } else {
+        key_data = args[0].u_obj;
+    }
+
+
+    mp_obj_t sig_data;
+    if (!(mp_obj_is_type(args[1].u_obj, &mp_type_bytes))) {
+        sig_data = read_file(args[1].u_obj);
+    } else {
+        sig_data = args[1].u_obj;
+    }
+    
+
+
+	int fmt = args[3].u_int;
     
     mbedtls_pk_context key;
     mbedtls_entropy_context entropy;
@@ -363,7 +464,7 @@ STATIC mp_obj_t mbedtls_ec_key_sign(size_t n_args, const mp_obj_t *pos_args, mp_
      }
     //Parse private key
     size_t key_len;
-    const byte *pkey = (const byte *)mp_obj_str_get_data(args[0].u_obj, &key_len);
+    const byte *pkey = (const byte *)mp_obj_str_get_data(key_data, &key_len);
 	if (fmt == 0){
 		key_len = key_len + 1;
 	}
@@ -380,7 +481,7 @@ STATIC mp_obj_t mbedtls_ec_key_sign(size_t n_args, const mp_obj_t *pos_args, mp_
 
     //Parse data
     size_t data_len;
-    const byte *data = (const byte *)mp_obj_str_get_data(args[1].u_obj, &data_len);
+    const byte *data = (const byte *)mp_obj_str_get_data(sig_data, &data_len);
 
 
     // SHA-256 hash of data
@@ -407,7 +508,15 @@ STATIC mp_obj_t mbedtls_ec_key_sign(size_t n_args, const mp_obj_t *pos_args, mp_
     mbedtls_ctr_drbg_free(&ctr_drbg);
     mbedtls_entropy_free(&entropy);
 
-    return mp_obj_new_bytes(buf, olen);
+    mp_obj_t signed_data = mp_obj_new_bytes(buf, olen);
+
+    if (mp_obj_is_str_or_bytes(args[2].u_obj)){
+
+        mp_obj_t wr_sz = write_file(args[2].u_obj, signed_data);
+        return wr_sz;
+
+    }
+    return signed_data;
 
 	
 cleanup:
@@ -437,6 +546,31 @@ STATIC mp_obj_t mbedtls_ec_key_verify(size_t n_args, const mp_obj_t *pos_args, m
     mp_check_self(mp_obj_is_str_or_bytes(args[1].u_obj));
 	mp_check_self(mp_obj_is_str_or_bytes(args[2].u_obj));
 
+
+    // check if key is a string/path
+    mp_obj_t key_data;
+    if (!(mp_obj_is_type(args[0].u_obj, &mp_type_bytes))) {
+        key_data = read_file(args[0].u_obj);
+    } else {
+        key_data = args[0].u_obj;
+    }
+
+
+    mp_obj_t sig_data;
+    if (!(mp_obj_is_type(args[1].u_obj, &mp_type_bytes))) {
+        sig_data = read_file(args[1].u_obj);
+    } else {
+        sig_data = args[1].u_obj;
+    }
+
+
+    mp_obj_t signature_data;
+    if (!(mp_obj_is_type(args[2].u_obj, &mp_type_bytes))) {
+        signature_data = read_file(args[2].u_obj);
+    } else {
+        signature_data = args[2].u_obj;
+    }
+
 	int fmt = args[3].u_int;
     
     mbedtls_pk_context key;
@@ -446,7 +580,7 @@ STATIC mp_obj_t mbedtls_ec_key_verify(size_t n_args, const mp_obj_t *pos_args, m
     mbedtls_pk_init( &key );
     //Parse public key
     size_t key_len;
-    const byte *pkey = (const byte *)mp_obj_str_get_data(args[0].u_obj, &key_len);
+    const byte *pkey = (const byte *)mp_obj_str_get_data(key_data, &key_len);
 	if (fmt == 0){
 		key_len = key_len + 1;
 	}
@@ -459,11 +593,11 @@ STATIC mp_obj_t mbedtls_ec_key_verify(size_t n_args, const mp_obj_t *pos_args, m
 
     //Parse data
     size_t data_len;
-    const byte *data = (const byte *)mp_obj_str_get_data(args[1].u_obj, &data_len);
+    const byte *data = (const byte *)mp_obj_str_get_data(sig_data, &data_len);
 
     //Parse sig
     size_t sig_len;
-    const byte *sig = (const byte *)mp_obj_str_get_data(args[2].u_obj, &sig_len);
+    const byte *sig = (const byte *)mp_obj_str_get_data(signature_data, &sig_len);
 
 
     // SHA-256 hash of data

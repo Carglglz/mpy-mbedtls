@@ -22,12 +22,12 @@ pk, pubk = keyp
 
 d_pubk = mbedtls.ec_get_pubkey(pk, mbedtls.FORMAT_PEM)
 
-assert (pubk == d_pubk)
+assert pubk == d_pubk
 print("Derive public key: OK")
 
 
-# Sign a message 
-msg = "hello world"
+# Sign a message
+msg = b"hello world"
 sig = mbedtls.ec_key_sign(pk, msg)
 
 assert isinstance(sig, bytes)
@@ -36,9 +36,6 @@ print(f"Signature: {type(sig)}")
 # Verify signature
 valid = mbedtls.ec_key_verify(pubk, msg, sig)
 
-assert valid 
+assert valid
 
 print("Valid signature: ", valid)
-
-
-

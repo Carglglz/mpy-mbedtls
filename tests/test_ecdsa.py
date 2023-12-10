@@ -9,7 +9,7 @@ assert isinstance(keyp.pubkey, bytes)
 
 print("EC key pair: OK")
 
-msg = "hello world"
+msg = b"hello world"
 
 # Sign
 signature = keyp.sign(msg)
@@ -43,8 +43,3 @@ n_keyp.derive_pubkey()
 assert isinstance(n_keyp.pubkey, bytes)
 
 print("Derive Public Key: OK")
-
-
-
-
-
