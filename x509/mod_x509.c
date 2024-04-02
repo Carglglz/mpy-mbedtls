@@ -29,7 +29,7 @@ struct gen_key_args {
 
 // Helper functions
 
-STATIC NORETURN void mbedtls_raise_error(int err) {
+static NORETURN void mbedtls_raise_error(int err) {
     // _mbedtls_ssl_send and _mbedtls_ssl_recv (below) turn positive error codes from the
     // underlying socket into negative codes to pass them through mbedtls. Here we turn them
     // positive again so they get interpreted as the OSError they really are. The
@@ -70,7 +70,7 @@ STATIC NORETURN void mbedtls_raise_error(int err) {
 }
 
 
-STATIC mp_obj_t read_file(mp_obj_t self_in) {
+static mp_obj_t read_file(mp_obj_t self_in) {
     // file = open(args[0], "rb")
     mp_obj_t f_args[2] = {
         self_in,
@@ -89,7 +89,7 @@ STATIC mp_obj_t read_file(mp_obj_t self_in) {
 }
 
 
-STATIC mp_obj_t write_file(mp_obj_t self_in, mp_obj_t data_in) {
+static mp_obj_t write_file(mp_obj_t self_in, mp_obj_t data_in) {
     // file = open(args[0], "rb")
     mp_obj_t f_args[2] = {
         self_in,
@@ -109,7 +109,7 @@ STATIC mp_obj_t write_file(mp_obj_t self_in, mp_obj_t data_in) {
 }
 
 //parse_cert(b"")
-STATIC mp_obj_t x509_parse_cert(const mp_obj_t cert_in){
+static mp_obj_t x509_parse_cert(const mp_obj_t cert_in){
    
    mp_check_self(mp_obj_is_str_or_bytes(cert_in));
    
@@ -165,7 +165,7 @@ MP_DEFINE_CONST_FUN_OBJ_1(x509_parse_cert_obj, x509_parse_cert);
 
 
 //gen_csr(subject, key)
-STATIC mp_obj_t x509_gen_csr(const mp_obj_t sub_in, const mp_obj_t key_in, const mp_obj_t csr_name){
+static mp_obj_t x509_gen_csr(const mp_obj_t sub_in, const mp_obj_t key_in, const mp_obj_t csr_name){
 
     mp_check_self(mp_obj_is_str_or_bytes(sub_in));
     mp_check_self(mp_obj_is_str_or_bytes(key_in));
@@ -274,7 +274,7 @@ cleanup:
 MP_DEFINE_CONST_FUN_OBJ_3(x509_gen_csr_obj, x509_gen_csr);
 
 
-STATIC mp_obj_t x509_verify_cert(const mp_obj_t cert_in, const mp_obj_t cacert_in){
+static mp_obj_t x509_verify_cert(const mp_obj_t cert_in, const mp_obj_t cacert_in){
 
     mp_check_self(mp_obj_is_str_or_bytes(cert_in));
     mp_check_self(mp_obj_is_str_or_bytes(cacert_in));
@@ -364,7 +364,7 @@ cleanup:
 MP_DEFINE_CONST_FUN_OBJ_2(x509_verify_cert_obj, x509_verify_cert);
 
 
-STATIC const mp_rom_map_elem_t mp_module_x509_globals_table[] = {
+static const mp_rom_map_elem_t mp_module_x509_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_x509) },
     { MP_ROM_QSTR(MP_QSTR_parse_cert), MP_ROM_PTR(&x509_parse_cert_obj) },
     { MP_ROM_QSTR(MP_QSTR_verify_cert), MP_ROM_PTR(&x509_verify_cert_obj) },
@@ -372,7 +372,7 @@ STATIC const mp_rom_map_elem_t mp_module_x509_globals_table[] = {
  
 };
 
-STATIC MP_DEFINE_CONST_DICT(mp_module_x509_globals, mp_module_x509_globals_table);
+static MP_DEFINE_CONST_DICT(mp_module_x509_globals, mp_module_x509_globals_table);
 
 const mp_obj_module_t mp_module_x509 = {
     .base = { &mp_type_module },

@@ -29,7 +29,7 @@
 
 
 // Helper functions
-STATIC NORETURN void mbedtls_raise_error(int err) {
+static NORETURN void mbedtls_raise_error(int err) {
     // _mbedtls_ssl_send and _mbedtls_ssl_recv (below) turn positive error codes from the
     // underlying socket into negative codes to pass them through mbedtls. Here we turn them
     // positive again so they get interpreted as the OSError they really are. The
@@ -70,7 +70,7 @@ STATIC NORETURN void mbedtls_raise_error(int err) {
 }
 
 
-STATIC mp_obj_t read_file(mp_obj_t self_in) {
+static mp_obj_t read_file(mp_obj_t self_in) {
     // file = open(args[0], "rb")
     mp_obj_t f_args[2] = {
         self_in,
@@ -89,7 +89,7 @@ STATIC mp_obj_t read_file(mp_obj_t self_in) {
 }
 
 
-STATIC mp_obj_t write_file(mp_obj_t self_in, mp_obj_t data_in) {
+static mp_obj_t write_file(mp_obj_t self_in, mp_obj_t data_in) {
     // file = open(args[0], "rb")
     mp_obj_t f_args[2] = {
         self_in,
@@ -109,11 +109,11 @@ STATIC mp_obj_t write_file(mp_obj_t self_in, mp_obj_t data_in) {
 }
 
 //version
-STATIC const MP_DEFINE_STR_OBJ(mbedtls_version_obj, MBEDTLS_VERSION_STRING_FULL);
+static const MP_DEFINE_STR_OBJ(mbedtls_version_obj, MBEDTLS_VERSION_STRING_FULL);
 
 
 //ec_curves()
-STATIC mp_obj_t mbedtls_ec_curves(void) {
+static mp_obj_t mbedtls_ec_curves(void) {
     mp_obj_t curve_list = mp_obj_new_list(0, NULL);
     
     const mbedtls_ecp_curve_info *curve_info;
@@ -127,7 +127,7 @@ STATIC mp_obj_t mbedtls_ec_curves(void) {
 MP_DEFINE_CONST_FUN_OBJ_0(mbedtls_ec_curves_obj, mbedtls_ec_curves);
 
 //ec_curve_info("curve")
-STATIC mp_obj_t mbedtls_ec_curve_info(const mp_obj_t o_in) {
+static mp_obj_t mbedtls_ec_curve_info(const mp_obj_t o_in) {
 
     mp_check_self(mp_obj_is_str_or_bytes(o_in));
     const char *curve = mp_obj_str_get_str(o_in);
@@ -147,7 +147,7 @@ MP_DEFINE_CONST_FUN_OBJ_1(mbedtls_ec_curve_info_obj, mbedtls_ec_curve_info);
 
 
 //ec_gen_key("curve")
-STATIC mp_obj_t mbedtls_ec_gen_key(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+static mp_obj_t mbedtls_ec_gen_key(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
 	
 	static const mp_arg_t allowed_args[] = {
         { MP_QSTR_curve, MP_ARG_OBJ | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_QSTR(MP_QSTR_secp256r1)} },
@@ -304,7 +304,7 @@ MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_ec_gen_key_obj, 0,  mbedtls_ec_gen_key);
 
 
 //Derive public key
-STATIC mp_obj_t mbedtls_ec_get_pubkey(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
+static mp_obj_t mbedtls_ec_get_pubkey(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
 	
 	static const mp_arg_t allowed_args[] = {
         { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
@@ -407,7 +407,7 @@ MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_ec_get_pubkey_obj, 1, mbedtls_ec_get_pubkey);
 
 
 // Sign
-STATIC mp_obj_t mbedtls_ec_key_sign(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
+static mp_obj_t mbedtls_ec_key_sign(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
 	
 	static const mp_arg_t allowed_args[] = {
         { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none }},
@@ -529,7 +529,7 @@ MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_ec_key_sign_obj, 2, mbedtls_ec_key_sign);
 
 
 // Verify
-STATIC mp_obj_t mbedtls_ec_key_verify(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
+static mp_obj_t mbedtls_ec_key_verify(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
 	
 	static const mp_arg_t allowed_args[] = {
         { MP_QSTR_key, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none} },
@@ -624,7 +624,7 @@ MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_ec_key_verify_obj, 3, mbedtls_ec_key_verify);
 
 
 // ECDH SECRET
-STATIC mp_obj_t mbedtls_ecdh_secret(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
+static mp_obj_t mbedtls_ecdh_secret(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
 	
 	static const mp_arg_t allowed_args[] = {
         { MP_QSTR_key_ours, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = mp_const_none} },
@@ -737,7 +737,7 @@ MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_ecdh_secret_obj, 2, mbedtls_ecdh_secret);
 // AES
 
 //ciphers()
-STATIC mp_obj_t mbedtls_aes_ciphers(void) {
+static mp_obj_t mbedtls_aes_ciphers(void) {
     mp_obj_t cipher_list = mp_obj_new_list(0, NULL);
     const int *cipher_info;
     const mbedtls_cipher_info_t *cipher_name;
@@ -758,7 +758,7 @@ STATIC mp_obj_t mbedtls_aes_ciphers(void) {
 MP_DEFINE_CONST_FUN_OBJ_0(mbedtls_aes_ciphers_obj, mbedtls_aes_ciphers);
 
 // AES ENCRYPT
-STATIC mp_obj_t mbedtls_aes_enc(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
+static mp_obj_t mbedtls_aes_enc(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
 	
 	static const mp_arg_t allowed_args[] = {
 		
@@ -866,7 +866,7 @@ cleanup:
 MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_aes_enc_obj, 5, mbedtls_aes_enc);
 
 
-STATIC mp_obj_t mbedtls_aes_dec(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
+static mp_obj_t mbedtls_aes_dec(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args){
 	
 	static const mp_arg_t allowed_args[] = {
 
@@ -985,7 +985,7 @@ cleanup:
 }
 MP_DEFINE_CONST_FUN_OBJ_KW(mbedtls_aes_dec_obj, 6, mbedtls_aes_dec);
 
-STATIC const mp_rom_map_elem_t mp_module_mbedtls_globals_table[] = {
+static const mp_rom_map_elem_t mp_module_mbedtls_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_mbedtls) }, 
     { MP_ROM_QSTR(MP_QSTR_version), MP_ROM_PTR(&mbedtls_version_obj) },
     { MP_ROM_QSTR(MP_QSTR_ec_curves), MP_ROM_PTR(&mbedtls_ec_curves_obj) },
@@ -1002,7 +1002,7 @@ STATIC const mp_rom_map_elem_t mp_module_mbedtls_globals_table[] = {
 	{ MP_ROM_QSTR(MP_QSTR_FORMAT_DER), MP_ROM_INT(FORMAT_DER) },
 };
 
-STATIC MP_DEFINE_CONST_DICT(mp_module_mbedtls_globals, mp_module_mbedtls_globals_table);
+static MP_DEFINE_CONST_DICT(mp_module_mbedtls_globals, mp_module_mbedtls_globals_table);
 
 const mp_obj_module_t mp_module_mbedtls = {
     .base = { &mp_type_module },
